@@ -282,7 +282,7 @@ vector<elemento> lerNetlist(char* nomeArquivo, int (&numeroDeVariaveis),vector <
         componente.d = numerarNoDoNetlist(parametros.at(4),listaDeNos); //nó4
         componente.gon = atof(parametros.at(5).c_str());                //gon
         componente.goff = atof(parametros.at(6).c_str());               //goff
-        componente.valor = atof(parametros.at(7).c_str());              //valor
+        componente.valor = atof(parametros.at(7).c_str());              //vref
 
         componente.tipo = tipo;
         netlist.push_back(componente);                                  //adiciona o componente à netlist
@@ -367,13 +367,11 @@ vector<elemento> lerNetlist(char* nomeArquivo, int (&numeroDeVariaveis),vector <
 
 void montarEstampasInvariantes(vector <elemento> (&netlist),MatrixXd (&A),VectorXd (&b))
 {
-
   MatrixXd Matriz(A.rows()+1,A.cols()+1);   //Matriz aumentada, contendo nó de terra. Primeira linha e coluna sempre é descartada
   VectorXd vetor(b.size()+1);               //sempre é esperado q o circuito tenha ao menos 1 nó de terra, caso contrário não é possível resolver por esse método
 
   Matriz =  MatrixXd::Zero(A.rows()+1,A.cols()+1);
   vetor = ArrayXd::Zero(b.size()+1);
-
 
   for(unsigned i=0;i<netlist.size();i++)
   {
@@ -681,7 +679,7 @@ void montarEstampasVariantesLineares(vector <elemento> (&netlist),MatrixXd (&A),
   }
 
   A += Matriz.bottomRightCorner(A.rows(),A.cols());    //Retorna a matriz sem o nós de terra, a ser resolvido
-  b += vetor.segment(1,b.size());              //Retorna vetor b sem incluir no de terra
+  b += vetor.segment(1,b.size());                      //Retorna vetor b sem incluir no de terra
 
 }
 
@@ -718,7 +716,9 @@ void montarEstampasVariantesLinearesPontoOperacao(vector <elemento> (&netlist),M
         }
       else if (netlist[i].tipoDeFonte == PULSE) //caso pulse
         {
-          //Não sei o que fazer aqui. Imagino que não seja necessário fazer nada, mas deixarei o código comentadado
+          //Eu discordo do Moreirão aqui. Nessa parte o Moreirão colocaria o valor da fonte pulso no instante zero (e para fazer com que os gráficos fiquem iguais aos dele)
+          //é necessário fazer isso). Entretanto, eu considero a fonte pulso como um sinal de entrada, e portanto não acho correto considera-la no ponto de operaçãonce
+          //Mais correto ainda fosse provavelmente utilizar o valor médio da fonte pulso, levando em conta as amplitudes1 e 2, e o duty cicle. Eu não me importei de programa-la.
         }
     }
     else if (netlist.at(i).tipo=='V'){
@@ -734,7 +734,7 @@ void montarEstampasVariantesLinearesPontoOperacao(vector <elemento> (&netlist),M
           }
       else if (netlist[i].tipoDeFonte == PULSE) //caso pulse
           {
-            //Não sei o que fazer aqui. Imagino que não seja necessário fazer nada, mas deixarei o código comentadado
+            //Ler comentario acima
           }
       }
   }
@@ -743,6 +743,105 @@ void montarEstampasVariantesLinearesPontoOperacao(vector <elemento> (&netlist),M
   b += vetor.segment(1,b.size());                      //Retorna vetor b sem incluir no de terra
 
 }
+
+void montarEstampasNaoLineares(vector <elemento> (&netlist),MatrixXd (&A),VectorXd (&b),VectorXd (&x))
+{
+
+  MatrixXd Matriz(A.rows()+1,A.cols()+1);
+  VectorXd vetor(b.size()+1);
+  VectorXd estado(x.size()+1);
+
+  Matriz =  MatrixXd::Zero(A.rows()+1,A.cols()+1);
+  vetor = ArrayXd::Zero(b.size()+1);
+
+  estado[0] = 0;
+  estado.segment(1,x.size()) = x;
+
+
+  for(unsigned i=0;i<netlist.size();i++)
+  {
+    if (netlist.at(i).tipo == '$') {    ////////////////////////////////
+      if ((estado[netlist[i].c] - estado[netlist[i].d]) <= netlist[i].valor)  //param3 = vref =valor
+      {
+        Matriz(netlist[i].a,netlist[i].a)+=netlist[i].goff; //param2 = goff
+        Matriz(netlist[i].b,netlist[i].b)+=netlist[i].goff;
+        Matriz(netlist[i].a,netlist[i].b)-=netlist[i].goff;
+        Matriz(netlist[i].b,netlist[i].a)-=netlist[i].goff;
+      }
+      else
+      {
+        Matriz(netlist[i].a,netlist[i].a)+=netlist[i].gon;  //param1 = gon
+        Matriz(netlist[i].b,netlist[i].b)+=netlist[i].gon;
+        Matriz(netlist[i].a,netlist[i].b)-=netlist[i].gon;
+        Matriz(netlist[i].b,netlist[i].a)-=netlist[i].gon;
+      }
+    }   ///////////////////
+    else if (netlist.at(i).tipo == 'N')
+    {
+      _long g;
+      _long z;
+
+      if ( (estado[netlist[i].a] - estado[netlist[i].b]) < netlist[i].pv2 )
+      {
+        if ((netlist[i].pv2-netlist[i].pv1) != 0)       //EVITA SISTEMAS SINGULARES
+        {
+          g=((netlist[i].pj2 - netlist[i].pj1) / (netlist[i].pv2-netlist[i].pv1));
+          z=(netlist[i].pj2 - g*netlist[i].pv2);
+        }
+        else
+        {
+          if (netlist[i].pv2 > netlist[i].pv1)
+            g=INFINITO;
+          else
+            g=-INFINITO;
+          z=(netlist[i].pj2 - g*netlist[i].pv2);
+        }
+      }
+      else if (((estado[netlist[i].a] - estado[netlist[i].b]) < netlist[i].pv3))
+      {
+        if ((netlist[i].pv3-netlist[i].pv2) != 0)     //EVITA SISTEMAS SINGULARES
+        {
+          g=(netlist[i].pj3 - netlist[i].pj2) / (netlist[i].pv3 - netlist[i].pv2);
+          z=(netlist[i].pj3 - g*netlist[i].pv3);
+        }
+        else
+        {
+          if (netlist[i].pv3 > netlist[i].pv2)
+            g=INFINITO;
+          else
+            g=-INFINITO;
+          z=(netlist[i].pj3 - g*netlist[i].pv3);
+        }
+      }
+      else
+      {
+        if ((netlist[i].pv4-netlist[i].pv3) != 0)     //EVITA SISTEMAS SINGULARES
+        {
+          g=(netlist[i].pj4 - netlist[i].pj3) / (netlist[i].pv4 - netlist[i].pv3);
+          z=(netlist[i].pj4 - g*netlist[i].pv4);
+        }
+        else
+        {
+          if (netlist[i].pv4 > netlist[i].pv3)
+            g=INFINITO;
+          else
+            g=-INFINITO;
+          z=(netlist[i].pj4 - g*netlist[i].pv4);
+        }
+      }
+
+          Matriz(netlist[i].a,netlist[i].a)+=g;
+          Matriz(netlist[i].b,netlist[i].b)+=g;
+          Matriz(netlist[i].a,netlist[i].b)-=g;
+          Matriz(netlist[i].b,netlist[i].a)-=g;
+          vetor(netlist[i].a)-=z;
+          vetor(netlist[i].b)+=z;
+    }
+  }
+
+  A += Matriz.bottomRightCorner(A.rows(),A.cols());    //Retorna a matriz sem o nós de terra, a ser resolvido
+  b += vetor.segment(1,b.size());              //Retorna vetor b sem incluir no de terra
+};
 
 void lerConfiguracao(vector <elemento> (&netlist),Configuracao (&config))
 {
@@ -822,4 +921,106 @@ void salvarResultadoEmArquivo(string nomeArquivo,const string extensao,vector <s
   }
 
   fclose(arquivoSolucao);
+};
+
+bool checarLinearidade(vector<elemento> (&netlist))
+{
+  unsigned int i=0;
+  for(;i<netlist.size();i++)
+    if ( (netlist[i].tipo == 'N') || (netlist[i].tipo == '$'))         //Não é linear
+      return false;
+  return true;  //é linear
+};
+
+bool newtonRaphsonChecarConvergencia(VectorXd (&x),VectorXd (&nr_x_anterior),vector <int> (&faltaConvergir))
+{
+  bool erroGrande = false;
+  for (unsigned i=0; i< x.size(); i++)
+  {
+    if ( (fabs(x[i] - nr_x_anterior[i])) > NEWTON_RAPHSON_MAX_ERRO_PERMITIDO)
+    {
+      faltaConvergir[i]=1;  //Nó ainda não convergiu
+      erroGrande=true;
+    }
+    else
+    {
+      faltaConvergir[i]=0;  //Nó convergiu
+    }
+  }
+  return (!erroGrande);
+}
+
+void newtonRaphsonInicializaVetorFaltaConvergir(vector<int> (&v))
+{
+  for(unsigned i=0;i<v.size();i++)
+    v[i] = 0;
+};
+
+void newtonRaphsonAtualizarSolucao(VectorXd (&x),VectorXd (&nr_x_anterior),vector <int> (&faltaConvergir))
+{
+  for (unsigned i=0;i < faltaConvergir.size();i++)
+  {
+    if (faltaConvergir[i] == 1)
+    {
+      nr_x_anterior[i] = x[i];
+    }
+  }
+};
+
+void printProgresso(int i, char simbolo,Configuracao (&config),_long (&t)){ //Printa o progresso do calculo, dependendo do passo atual{
+  int porcentagem = 100/i;
+  int progredi =
+  static_cast <int> (floor((t/(config.getTempoFinal()/porcentagem))) - floor( (t-config.getPasso()) / (config.getTempoFinal()/porcentagem) ) );
+
+  if(t == 0)
+    {
+      cout << "Progresso: " << flush;
+    }
+
+  if(progredi != 0)   //se eu tiver progredido
+    {
+      for(int i = 1;i <= progredi;i++)  //printo pauzinhos suficientes para quanto eu progredi
+      cout << simbolo << flush;
+    }
+
+  if(t > config.getTempoFinal()-config.getPasso())
+  {
+      cout << endl;
+  }
+};
+
+void clrscr()
+{
+  cout << "\033[2J\033[1;1H";
+}
+
+void newtonRaphsonMontarCondutanciasGmin(vector <elemento> (&netlist),MatrixXd (&A),VectorXd (&b),vector <int> (&faltaConvergir),_long condutanciaGmin)
+{
+
+  MatrixXd Matriz(A.rows()+1,A.cols()+1);
+  VectorXd vetor(b.size()+1);
+
+  Matriz =  MatrixXd::Zero(A.rows()+1,A.cols()+1);
+  vetor = ArrayXd::Zero(b.size()+1);
+
+  for(unsigned i=1;i<=netlist.size();i++)
+  {
+    if (faltaConvergir[i-1] == 1){                      //se esse no i nao convergiu..
+      if ((netlist[i].a==(int)i)||(netlist[i].b==(int)i))
+      {                                                 //e se o elemento encosta nesse no problematico..
+        Matriz(netlist[i].a,netlist[i].a)+=condutanciaGmin;
+        Matriz(netlist[i].b,netlist[i].b)+=condutanciaGmin;
+        Matriz(netlist[i].a,netlist[i].b)-=condutanciaGmin;
+        Matriz(netlist[i].b,netlist[i].a)-=condutanciaGmin;
+
+        if (netlist[i].tipo =='N')
+        {                   //e se for um resistor nao linear, coloco uma fonte de corrente
+          vetor(netlist[i].a)-=(netlist[i].pv2 + netlist[i].pv3)*condutanciaGmin/(2);
+          vetor(netlist[i].b)+=(netlist[i].pv2 + netlist[i].pv3)*condutanciaGmin/(2);
+        }
+      }
+    }
+  }
+  A += Matriz.bottomRightCorner(A.rows(),A.cols());    //Retorna a matriz sem o nós de terra, a ser resolvido
+  b += vetor.segment(1,b.size());                      //Retorna vetor b sem incluir no de terra
 };

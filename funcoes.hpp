@@ -32,6 +32,9 @@ void montarEstampasVariantesLineares(vector <elemento> (&netlist),MatrixXd (&Mat
 /*Estampas de elementos variantes Para o ponto de operação. Elas dependem da configuracao, e por isso é necessario passar para a funcao*/
 void montarEstampasVariantesLinearesPontoOperacao(vector <elemento> (&netlist),MatrixXd (&Matriz),VectorXd (&vetor),Configuracao (&config));
 
+/*Estampas não lineares. Nas estampas não lineares, a estampa se altera de acordo com estado atual da solução, e por isso é necessário passar "x" para solução*/
+void montarEstampasNaoLineares(vector <elemento> (&netlist),MatrixXd (&A),VectorXd (&b),VectorXd (&x));
+
 /*Le as informacoes de configuracao do Netlist*/
 void lerConfiguracao(vector <elemento> (&netlist),Configuracao (&config));
 
@@ -46,5 +49,26 @@ void salvarResultadoEmMemoria(VectorXd (&x),vector<string> (&resultado),_long t)
 
 /*Salva resultados de simulacao do vetor no disco, em arquivo com "nome de arquivo"*/
 void salvarResultadoEmArquivo(string nomeArquivo,const string extensao,vector <string> (&listaDeNos),vector<string> (&resultado));
+
+/*Checa se netlist só contem componentes lineares. Caso sim, não é necessário fazer Newton Raphson*/
+bool checarLinearidade(vector<elemento> (&netlist));
+
+/*Função que checa se análise de Newton Raphson já convergiu*/
+bool newtonRaphsonChecarConvergencia(VectorXd (&x),VectorXd (&nr_x_anterior),vector <int> (&faltaConvergir));
+
+/*funcao que inicializa o vetor que indica quais variaveis faltam convergir no Newton Raphson*/
+void newtonRaphsonInicializaVetorFaltaConvergir(vector<int> (&v));
+
+/*Atualiza solução anterior do Newton Raphson*/
+void newtonRaphsonAtualizarSolucao(VectorXd (&x),VectorXd (&nr_x_anterior),vector <int> (&faltaConvergir));
+
+/*gmin-stepping: Montar condutancias em paralelo com elementos não lineares*/
+void newtonRaphsonMontarCondutanciasGmin(vector <elemento> (&netlist),MatrixXd (&A),VectorXd (&b),vector <int> (&faltaConvergir),_long condutanciaGmin);
+
+/*Printa o progresso do calculo, dependendo do passo atual*/
+void printProgresso(int i, char simbolo,Configuracao (&config),_long (&t));
+
+/*Limpa a tela*/
+void clrscr();
 
 #endif
